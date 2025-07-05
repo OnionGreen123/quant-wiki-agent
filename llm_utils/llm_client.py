@@ -80,12 +80,14 @@ class LLMClient:
         self.system_prompt = prompt
         print(f"System prompt 已设置为: '{prompt}'")
 
-    def call(self, user_prompt: str, **kwargs) -> str:
+    def call(self, user_prompt: str, max_retries: int = 3, retry_delay: float = 1.0, **kwargs) -> str:
         """
-        调用大模型并获取返回结果。
+        调用大模型并获取返回结果，支持出错自动重试。
 
         参数:
             user_prompt (str): 用户输入的问题或指令。
+            max_retries (int): 最大重试次数，默认3次。
+            retry_delay (float): 每次重试间隔秒数，默认2秒。
             **kwargs: 传递给底层 API 的其他参数 (e.g., temperature, max_tokens)。
 
         返回:
@@ -94,24 +96,29 @@ class LLMClient:
         if not self.client:
             raise ConnectionError("客户端未初始化，请检查初始化参数。")
         
-        try:
-            # 构建消息列表
-            messages = []
-            if self.system_prompt:
-                messages.append({"role": "system", "content": self.system_prompt})
-            messages.append({"role": "user", "content": user_prompt})
-            
-            # 统一使用 OpenAI chat completions API
-            response = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=messages,
-                **kwargs
-            )
-            return response.choices[0].message.content.strip()
-
-        except Exception as e:
-            print(f"调用 API 时出错: {e}")
-            return f"Error: {e}"
+        last_exception = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                # 构建消息列表
+                messages = []
+                if self.system_prompt:
+                    messages.append({"role": "system", "content": self.system_prompt})
+                messages.append({"role": "user", "content": user_prompt})
+                
+                # 统一使用 OpenAI chat completions API
+                response = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=messages,
+                    **kwargs
+                )
+                return response.choices[0].message.content.strip()
+            except Exception as e:
+                print(f"调用 API 时出错（第{attempt}次）: {e}")
+                last_exception = e
+                if attempt < max_retries:
+                    import time
+                    time.sleep(retry_delay)
+        return f"Error after {max_retries} retries: {last_exception}"
 
     def get_available_models(self):
         """
@@ -132,3 +139,12 @@ class LLMClient:
 
     def __repr__(self):
         return self.__str__()
+    
+# test 
+# test_client = LLMClient()
+# print(test_client.api_key)
+# print(test_client.base_url)
+# print(test_client.model_name)
+
+# test_output = test_client.call("Hello, how are you?", max_retries=1, retry_delay=0.5)
+# print(test_output)
